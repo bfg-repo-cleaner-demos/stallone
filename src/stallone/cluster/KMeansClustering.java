@@ -4,6 +4,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
 import stallone.api.algebra.Algebra;
 import stallone.api.cluster.IClustering;
 import stallone.api.datasequence.DataSequence;
@@ -33,8 +39,7 @@ public class KMeansClustering implements IClustering
     private static final int INIT_RANDOM = 2;
     /** init cluster centers by given indices to data. */
     private static final int INIT_BY_INDICES = 3;
-    /** Data to be clustered by k-means; */
-    /** Data to be clustered by k-means; */
+    /** Data to be clustered by k-means */
     private Iterable<IDoubleArray> data;
     private int size = -1;
     /**
@@ -157,7 +162,8 @@ public class KMeansClustering implements IClustering
         boolean clustersChanged;
         boolean doMoreIterations;
         int loopIdx = 0;
-
+        
+        ExecutorService poolExecutor = Executors.newCachedThreadPool();
         // the main loop
         do
         {
@@ -175,7 +181,7 @@ public class KMeansClustering implements IClustering
             loopIdx++;
             System.out.println("Iteration step: " + loopIdx);
 
-            clustersChanged = assign();
+            clustersChanged = assign(poolExecutor);
             if (clustersChanged)
             {
                 updateCenters();
@@ -187,30 +193,29 @@ public class KMeansClustering implements IClustering
         this.voronoiDiscretization = Discretization.create.voronoiDiscretization(clusterCenters, metric);
     }
 
-    private boolean assign()
-    {
-        // reset flags
-        boolean clustersChanged = false;
-
-        // make the assignments
-        //for (int i = 0; i < n; i++)
-        int i = 0;
-        for (Iterator<IDoubleArray> it = data.iterator(); it.hasNext();)
+    private class AssignVecToClosestCluster implements Callable<Boolean> {
+        IDoubleArray vec;
+        int i;
+        
+        public AssignVecToClosestCluster(IDoubleArray vec, int i) {
+            this.vec = vec;
+            this.i = i;
+        }
+        
+        @Override
+        public Boolean call() throws Exception
         {
-            IDoubleArray current = it.next();
-
             // find the closest center
             int closest = 0;
-            double closestDistance = metric.distance(current, clusterCenters.get(0));
+            boolean clustersChanged = false;
+            double closestDistance = metric.distance(vec, clusterCenters.get(0));
 
-            // double closestDistance = distanceMeasure
-            // .value(set.get(i), clusterCenters[0]);
-            for (int j = 1; j < this.numberOfClusters; j++)
+            for (int j = 1; j < numberOfClusters; j++)
             {
 
                 // double distance = distanceMeasure
                 // .value(set.get(i), clusterCenters[j]);
-                double distance = metric.distance(current, clusterCenters.get(j));
+                double distance = metric.distance(vec, clusterCenters.get(j));
 
                 if (distance < closestDistance)
                 {
@@ -224,10 +229,54 @@ public class KMeansClustering implements IClustering
                 clustersChanged = true;
             }
 
+            // TODO: is this synchronized?
             assignments.set(i, closest);
+        
+            return clustersChanged;
+        }
+        
+    }
+    
+    private boolean assign(ExecutorService pool)
+    {
+        // reset flags
+        boolean clustersChanged = false;
 
+        // make the assignments
+        int i = 0;
+        List<Callable<Boolean>> todo = new ArrayList<>();
+        List<Future<Boolean>> results = null;
+        for (Iterator<IDoubleArray> it = data.iterator(); it.hasNext();)
+        {
+            IDoubleArray current = it.next();
+            todo.add(new AssignVecToClosestCluster(current, i));
             i++;
-        } // end for
+        }
+        
+        try
+        {
+            results = pool.invokeAll(todo);
+        } catch (InterruptedException e)
+        {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+        
+        for (Future<Boolean> future : results)
+        {
+            try
+            {
+                if (future.get() == Boolean.TRUE) {
+                    clustersChanged = true;
+                    break;
+                }
+            } catch (InterruptedException | ExecutionException e)
+            {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+            }
+        }
+
 
         return (clustersChanged);
     }
@@ -246,7 +295,6 @@ public class KMeansClustering implements IClustering
 
         int j = 0;
         for (Iterator<IDoubleArray> it = data.iterator(); it.hasNext();)
-        //for (int j = 0; j < data.size(); j++)
         {
 
             IDoubleArray currentVector = it.next();
@@ -261,7 +309,6 @@ public class KMeansClustering implements IClustering
         }
 
         // normalize
-
         emptyCenterIndices.clear();
         
         for (int i = 0; i < numberOfClusters; i++)
@@ -270,6 +317,7 @@ public class KMeansClustering implements IClustering
             if(assignmentWeight[i]==0.0d){
                 emptyCenterIndices.add(i);
             }
+            // TODO: if weight is zero, scale the vector by NaN
             Algebra.util.scale(1.0d / assignmentWeight[i], clusterCenters.get(i));
         }
 
@@ -282,6 +330,7 @@ public class KMeansClustering implements IClustering
             else{
                 System.out.printf("Removing %d empty cluster centers.", emptyCenterIndices.size());
                 for(int i : emptyCenterIndices){
+                    System.out.println();
                     clusterCenters.remove(i);
                     numberOfClusters--;
                 }

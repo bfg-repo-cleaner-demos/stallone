@@ -16,7 +16,8 @@ public class TestKMeans
     
     @Before
     public void setUp() throws IOException {
-        String files = "/home/marscher/md_simulation_data/trajall_500K.xtc";
+        //String files = "/home/marscher/md_simulation_data/trajall_500K.xtc";
+        String files = "475-75.xtc";
         IDataReader loader = API.dataNew.dataSequenceLoader(files);
         IDataSequence data = loader.load();
         
