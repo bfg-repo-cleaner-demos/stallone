@@ -163,7 +163,6 @@ public class KMeansClustering implements IClustering
         boolean doMoreIterations;
         int loopIdx = 0;
         
-        ExecutorService poolExecutor = Executors.newCachedThreadPool();
         // the main loop
         do
         {
@@ -181,7 +180,7 @@ public class KMeansClustering implements IClustering
             loopIdx++;
             System.out.println("Iteration step: " + loopIdx);
 
-            clustersChanged = assign(poolExecutor);
+            clustersChanged = assign();
             if (clustersChanged)
             {
                 updateCenters();
@@ -212,9 +211,6 @@ public class KMeansClustering implements IClustering
 
             for (int j = 1; j < numberOfClusters; j++)
             {
-
-                // double distance = distanceMeasure
-                // .value(set.get(i), clusterCenters[j]);
                 double distance = metric.distance(vec, clusterCenters.get(j));
 
                 if (distance < closestDistance)
@@ -229,7 +225,7 @@ public class KMeansClustering implements IClustering
                 clustersChanged = true;
             }
 
-            // TODO: is this synchronized?
+            // TODO: should assign only if new closest center found?
             assignments.set(i, closest);
         
             return clustersChanged;
@@ -237,48 +233,39 @@ public class KMeansClustering implements IClustering
         
     }
     
-    private boolean assign(ExecutorService pool)
+    private boolean assign()
     {
         // reset flags
         boolean clustersChanged = false;
 
         // make the assignments
+        ExecutorService pool = Executors.newFixedThreadPool(1);
         int i = 0;
-        List<Callable<Boolean>> todo = new ArrayList<>();
+        List<Callable<Boolean>> jobs = new ArrayList<>();
         List<Future<Boolean>> results = null;
-        for (Iterator<IDoubleArray> it = data.iterator(); it.hasNext();)
+        for (Iterator<IDoubleArray> it = data.iterator(); it.hasNext(); i++)
         {
             IDoubleArray current = it.next();
-            todo.add(new AssignVecToClosestCluster(current, i));
-            i++;
+            jobs.add(new AssignVecToClosestCluster(current, i));
         }
         
         try
         {
-            results = pool.invokeAll(todo);
-        } catch (InterruptedException e)
-        {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        }
-        
-        for (Future<Boolean> future : results)
-        {
-            try
+            // calculate assignments for all points 
+            results = pool.invokeAll(jobs);
+            // check if an assignment as been changed
+            for (Future<Boolean> future : results)
             {
                 if (future.get() == Boolean.TRUE) {
-                    clustersChanged = true;
-                    break;
+                    return true;
                 }
-            } catch (InterruptedException | ExecutionException e)
-            {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
             }
+        } catch (InterruptedException | ExecutionException e)
+        {
+           throw new RuntimeException("assignment went wrong due to: " + e);
         }
 
-
-        return (clustersChanged);
+        return clustersChanged;
     }
 
     private void updateCenters()
@@ -300,6 +287,7 @@ public class KMeansClustering implements IClustering
             IDoubleArray currentVector = it.next();
 
             int assignedTo = assignments.get(j);
+            assert(assignedTo >= 0);
             assignmentWeight[assignedTo] += 1;
 
             IDoubleArray clusterCenter = clusterCenters.get(assignedTo);
@@ -316,16 +304,16 @@ public class KMeansClustering implements IClustering
             //Store indices of empty cluster centers
             if(assignmentWeight[i]==0.0d){
                 emptyCenterIndices.add(i);
+            } else {
+                // TODO: if weight is zero, scale the vector by NaN
+                Algebra.util.scale(1.0d / assignmentWeight[i], clusterCenters.get(i));
             }
-            // TODO: if weight is zero, scale the vector by NaN
-            Algebra.util.scale(1.0d / assignmentWeight[i], clusterCenters.get(i));
         }
 
         //Remove empty cluster centers
         if(!emptyCenterIndices.isEmpty()){
             if(emptyCenterIndices.size()>=numberOfClusters){
-                System.out.println("Fatal error. All cluster centers empty. -> System.exit(1)!");
-                System.exit(1);
+                throw new RuntimeException("Fatal error. All cluster centers empty.");
             }
             else{
                 System.out.printf("Removing %d empty cluster centers.", emptyCenterIndices.size());
