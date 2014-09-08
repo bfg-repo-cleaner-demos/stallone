@@ -37,6 +37,6 @@ public class Test
         names.add("/Users/noe/data/software_projects/TestProject/src/test/dtraj_stride10.dat");
         List<IIntArray> dtrajs = intseq.loadIntSequences(names);
 
-        IHMM pmm = hmm.pmm(dtrajs, 2, 10);
+        IHMM pmm = hmm.pmm(dtrajs, 2, 1);
     }
 }
