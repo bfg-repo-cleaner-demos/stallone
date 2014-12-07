@@ -191,4 +191,28 @@ public class Step_Rev_Row_Beta implements IReversibleSamplingStep
         count[1]=this.nacc;
         return count;
     }
+    
+    public static void main(String[] args)
+    {
+        int n = 10;
+        IDoubleArray C = doublesNew.array(n, n);
+        doubles.fill(C, 2);
+        IDoubleArray P = doublesNew.array(n, n);
+        doubles.fill(P, 1.0/n);
+        IDoubleArray mu = doublesNew.array(n);
+        doubles.fill(mu, 1.0/n);
+        
+        Step_Rev_Row_Beta s = new Step_Rev_Row_Beta();
+        s.init(C, P, mu);
+        
+        long t1 = System.currentTimeMillis();
+        
+        int N = 1000000;
+        for (int i=0; i<N; i++)
+            for (int k=0; k<n; k++)
+                s.sampleRow(k);
+        
+        long t2 = System.currentTimeMillis();
+        System.out.println(t2-t1);
+    }
 }
